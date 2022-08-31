@@ -266,7 +266,7 @@ ResNet可以以较高的计算效率（相对于VGG）同时达到很高的精�
 
 使用分组卷积可以降低 $G$ 倍的计算量：
 
-<img src="img/image-20220801212107986.png" alt="image-20220801212107986" style="zoom:50%;" />
+<img src="img/image-20220801212107986.png" alt="image-20220801212107986" style="zoom: 50%;" />
 
 MobileNet中使用的所谓深度可分离卷积中的Depthwise Convolution实际上就是 $G = C_{in}$ 的分组卷积：
 

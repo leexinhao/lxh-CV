@@ -74,7 +74,7 @@
 
 #### Nesterov Momentum
 
-**Nesterov Accelerated Gradient（NAG）**的改动在于他不是直接使用历史梯度和当前地图的矢量和，而是先走历史梯度，然后使用新的位置的梯度进行更新：
+**Nesterov Accelerated Gradient（NAG）**的改动在于他不是直接使用历史梯度和当前梯度的矢量和，而是先走历史梯度，然后使用新的位置的梯度进行更新：
 
 <img src="img/image-20220724115427545.png" alt="image-20220724115427545" style="zoom:50%;" />
 

@@ -1,2 +1,0 @@
-# Visual and Understanding
-

@@ -74,7 +74,7 @@ C、$△=2$分组:[3,4,5]，[6,7,8]……,[18,19,20]；
 
 正是因为能产生多个定位结果，因而能够完成detection的任务。
 
-## YOLO
+## YOLOv1
 
 非常著名的模型，来源于论文："You Only Look Once: Unified, Real-Time Object Detection"，相对于之前的模型，它主要有以下几个优点：
 
@@ -157,7 +157,7 @@ $\mathbb{1}_{i}^{\text {obj }}$ 代表的是第 $i$ 个网格单元里有没有�
 
   <img src="img/image-20220821154457123.png" alt="image-20220821154457123" style="zoom: 33%;" />
 
-- 有物体中心落入的cell，需要计算分类loss，两个predictor都要计算confidence loss，预测的bounding box与ground truth IOU比较大的那个predictor需要计算localization loss。没有物体中心落入的cell，则只需要计算confidence loss。
+- 有物体中心落入的cell，需要计算分类loss， $B$ 个predictor都要计算confidence loss，预测的bounding box与ground truth IOU比较大的那个predictor需要计算localization loss。没有物体中心落入的cell，则只需要计算confidence loss。
 
 <img src="img/439761-20190220141923057-1338687028.jpg" alt="img" style="zoom: 80%;" />
 

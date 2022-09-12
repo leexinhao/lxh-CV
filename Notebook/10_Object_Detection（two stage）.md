@@ -262,6 +262,3 @@ self.RPN_bbox_pred = nn.Conv2d(512, self.nc_bbox_out, 1, 1, 0)
    Faster RCNN的RPN和RCNN两阶段分工明确，带来精度提升，但是两阶段的速度明显相较于单阶段是慢的，实际运用并未实时。因此网络阶数也值得讨论，单阶是否可以使网络更快，更多阶能否使网络精度更高等。
 
 针对的改进网络可以见：https://blog.csdn.net/qq_41214679/article/details/114595001
-
-## Mask R-CNN
-

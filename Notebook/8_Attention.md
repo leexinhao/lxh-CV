@@ -395,4 +395,89 @@ O = w_A A + w_B B + w_C C = f(A) A + f(B) B + f(C) C
 $$
 可以看出，最终整合信息时加权求和的形式没有变，所以可能是这样才让人任意产生注意力机制与全连接层没有区别的疑惑。然而事实上**注意力机制的意义是引入了权重函数$f$，使得权重与输入相关，从而避免了全连接层中权重固定的问题。**
 
-## 各种各样的新的Self-Attention机制
+## 各种各样的新的Attention机制
+
+注意力机制的效果很好，更多被诟病的是它的计算复杂度与序列长度的平方成正比，因而涌现出非常多针对attention计算效率的改进，它们都不约而同的取名“x-former”，虽然实现机制各不相同，但根本上都是为了减少attention map的计算量：
+
+<img src="img/image-20220912193032456.png" alt="image-20220912193032456" style="zoom:67%;" />
+
+不过减少计算量的同时往往也会带来性能上的损失，因而实际上现在还没有一种完美的attention机制：
+
+<img src="img/image-20220912192526193.png" alt="image-20220912192526193" style="zoom: 67%;" />
+
+<img src="img/image-20220912222403629.png" alt="image-20220912222403629" style="zoom:50%;" />
+
+### Human knowledge
+
+一种策略是通过人工知识只计算部分attention map，比如最简单的，假如我们认为在产生某个query token对应的输出只需要看与它相邻的token，类似CNN的局部连接（事实上attention可以理解成失去了一些先验的CNN）：
+
+<img src="img/image-20220912200117227.png" alt="image-20220912200117227" style="zoom:50%;" />
+
+或者是以“隔山打牛的方式看离它较远的token：
+
+<img src="img/image-20220912200218338.png" alt="image-20220912200218338" style="zoom:50%;" />
+
+或者给与一些位置的token能看到整个序列和被整个序列看到的能力，通常是`<cls>` token或者也可以是文章的标题等：
+
+<img src="img/image-20220912200541382.png" alt="image-20220912200541382" style="zoom:50%;" />
+
+那么你会说到底应该选择哪个呢，事实上小孩子才做选择，实际常常使用多种上述方式的结合：
+
+<img src="img/image-20220912200929455.png" alt="image-20220912200929455" style="zoom:50%;" />
+
+### Clustering
+
+我们可以利用聚类的方式使得query只关注相近的key：
+
+<img src="img/image-20220912201220260.png" alt="image-20220912201220260" style="zoom:50%;" />
+
+<img src="img/image-20220912201227840.png" alt="image-20220912201227840" style="zoom:50%;" />
+
+当然这里的聚类方式会是高效的近似聚类算法（不然用原始KMeans计算量只增不减）。
+
+### Learnable Pattern
+
+事实上我们也可以将哪些该计算哪些不该算这个binary mask用神经网络去学习到：
+
+<img src="img/image-20220912202905693.png" alt="image-20220912202905693" style="zoom:50%;" />
+
+这看上去像是在“套娃”，你可能马上会想到两个问题：
+
+- 反正都要learn，**为什么不直接learn出attention map呢**？确实，之后的改进论文也确实是这么做的；
+- 直接预测一个map它的**计算复杂度不是没有比之前的attention更低吗**？这实际上涉及到上图没有展示的细节，在真正实现的时候，对于一个input sequence中的所有token，并不会为每一个token都预测一条attention cloumn，而是只为部分token预测，然后和其余token**共用**，也就是说我们预测的实际上是一个**更低分辨率的attention map**。
+
+### Representative key
+
+Linformer利用矩阵的低秩分解将attention map的计算**降至线性复杂度**，首先我们观察到自注意力是低秩的，然后通过做矩阵的低秩分解来降低计算复杂度：
+
+<img src="img/image-20220912204554017.png" alt="image-20220912204554017" style="zoom:50%;" />
+
+这本质上是通过减少key的数量来降低计算量：
+
+<img src="img/image-20220912210243948.png" alt="image-20220912210243948" style="zoom:50%;" />
+
+除了上面说的使用低秩分解降低key的数量以外，还可以用CNN降维来减少key的数量：
+
+<img src="img/image-20220912210407171.png" alt="image-20220912210407171" style="zoom:50%;" />
+
+> 你可能会想为什么是减少key的数量而不是query的数量呢，主要是考虑到降低query数量会影响输出数量，对于输出数量低于输入数量的task你或许是可以这么做的，否则的话就不太方便了。
+
+### k,q first → v,k first
+
+还有一个减少计算量的思路是先算矩阵kv之积，但是由于有个softmax在，需要做一些近似和转换，不同的文章为此提供不同的策略：
+
+<img src="img/image-20220912221155933.png" alt="image-20220912221155933" style="zoom:50%;" />
+
+> $\phi(\cdot)$ 可能是一个降维操作，因而可以把复杂度降下来。
+
+### New framework
+
+<img src="img/image-20220912222631699.png" alt="image-20220912222631699" style="zoom:50%;" />
+
+一种更激进的思路是我们似乎不需要通过query和key来计算attention map，之前的sinkhorn是通过神经网络来预测attention map。
+
+而synthesizer更激进，直接**将attention map变为了网络的可学习参数，你会说这样不是对于不同的输入token，attention map是一样的吗**，是的！就是一样的，神奇的是这样做并没有掉很多点，这也让很多工作开始重新思考attention机制的存在的意义，甚至出现了不少不用attention机制的工作：
+
+<img src="img/image-20220912223957923.png" alt="image-20220912223957923" style="zoom:50%;" />
+
+当然了想要sota的话目前attention还是应用的fei'c

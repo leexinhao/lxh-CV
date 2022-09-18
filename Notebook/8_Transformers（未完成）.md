@@ -116,21 +116,112 @@ class TransformerEncoder(d2l.Encoder):
         # 因此嵌入值乘以嵌入维度的平方根进行缩放，
         # 然后再与位置编码相加。
         X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
-        self.attention_weights = [None] * len(self.blks)
         for i, blk in enumerate(self.blks):
             X = blk(X, valid_lens)
-            self.attention_weights[
-                i] = blk.attention.attention.attention_weights
         return X
 ```
 
 ### 解码器
 
-https://zh.d2l.ai/chapter_attention-mechanisms/transformer.html下面有人说写错了，先不管，后头回来自己跑一遍看看。
+> mask机制更多介绍可以参考：https://ifwind.github.io/2021/08/17/Transformer%E7%9B%B8%E5%85%B3%E2%80%94%E2%80%94%EF%BC%887%EF%BC%89Mask%E6%9C%BA%E5%88%B6/
 
-==然后训练和测试其实没太搞懂或者说搞忘了，训练的输出是多个标签吗，测试的时候用一个query还是已知的输出（用一个query好像就不是自注意力了）==
+首先实现单个decoder块，decoder块和encoder块不同，它由两种不同的attention块组成：
 
-mask机制或许可以参考：https://ifwind.github.io/2021/08/17/Transformer%E7%9B%B8%E5%85%B3%E2%80%94%E2%80%94%EF%BC%887%EF%BC%89Mask%E6%9C%BA%E5%88%B6/
+- 第一种是mask multi-head self-attention，它接受解码器的输入作为query、key、value，在训练过程为了并行性我们是把整个句子一下输入进来的，而按照解码器的逻辑，每个token只能看到在它时间步之前的token，因而我们需要用掩码对attention map进行掩蔽（代码里叫valid lens）；
+- 第二种是普通的 multi-head attention，它将编码器的输出作为key和value，接受上一个attention块的输出作为query。
+
+```python
+class DecoderBlock(nn.Module):
+    """解码器中第i个块"""
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
+                 dropout, i, **kwargs):
+        super(DecoderBlock, self).__init__(**kwargs)
+        self.i = i
+        self.attention1 = d2l.MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout)
+        self.addnorm1 = AddNorm(norm_shape, dropout)
+        self.attention2 = d2l.MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout)
+        self.addnorm2 = AddNorm(norm_shape, dropout)
+        self.ffn = PositionWiseFFN(ffn_num_input, ffn_num_hiddens,
+                                   num_hiddens)
+        self.addnorm3 = AddNorm(norm_shape, dropout)
+
+    def forward(self, X, state):
+        enc_outputs, enc_valid_lens = state[0], state[1]
+        '''
+        # 训练阶段，输出序列的所有词元都在同一时间处理，
+        # 因此state[2][self.i]初始化为None。
+        # 预测阶段，输出序列是通过词元一个接着一个解码的，
+        # 因此state[2][self.i]包含着直到当前时间步第i个块解码的输出表示
+        if state[2][self.i] is None:
+            key_values = X
+        else:
+            key_values = torch.cat((state[2][self.i], X), axis=1)
+        state[2][self.i] = key_values
+        # 上面的是错误代码，拼接已预测token的操作不应该在这里完成，
+        # 因为这里加不到位置编码，应该在外面加了位置编码后再送进来
+        '''
+        if self.training:
+            batch_size, num_steps, _ = X.shape
+            # dec_valid_lens的开头:(batch_size,num_steps),
+            # 其中每一行是[1,2,...,num_steps]
+            dec_valid_lens = torch.arange(
+                1, num_steps + 1, device=X.device).repeat(batch_size, 1)
+        else:
+            dec_valid_lens = None
+
+        # 自注意力
+        X2 = self.attention1(X, key_values, key_values, dec_valid_lens)
+        Y = self.addnorm1(X, X2)
+        # 编码器－解码器注意力。
+        # enc_outputs的开头:(batch_size,num_steps,num_hiddens)
+        Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
+        Z = self.addnorm2(Y, Y2)
+        return self.addnorm3(Z, self.ffn(Z)), state
+```
+
+根据《动手学深度学习》中测试代码的实现，解码器在测试时输入和输出都是单个token，那么就需要加上被我注释了的那两段代码，若允许测试时输入和输出随着时间步越来越长，就不用加。
+
+```python
+class TransformerDecoder(d2l.AttentionDecoder):
+    def __init__(self, vocab_size, key_size, query_size, value_size,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout, **kwargs):
+        super(TransformerDecoder, self).__init__(**kwargs)
+        self.num_hiddens = num_hiddens
+        self.num_layers = num_layers
+        self.embedding = nn.Embedding(vocab_size, num_hiddens)
+        self.pos_encoding = d2l.PositionalEncoding(num_hiddens, dropout)
+        self.blks = nn.Sequential()
+        for i in range(num_layers):
+            self.blks.add_module("block"+str(i),
+                DecoderBlock(key_size, query_size, value_size, num_hiddens,
+                             norm_shape, ffn_num_input, ffn_num_hiddens,
+                             num_heads, dropout, i))
+        self.dense = nn.Linear(num_hiddens, vocab_size)
+
+    def init_state(self, enc_outputs, enc_valid_lens, *args):
+        return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
+
+    def forward(self, X, state):
+        # 如果要求测试时输入和输出都是一个token则需要加上下面两段被注释了的代码：
+        '''
+        if not self.training:
+            self.seqX = X if self.seqX is None else torch.cat((self.seqX, X), dim=1)
+            X = self.seqX
+        '''
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+
+        for i, blk in enumerate(self.blks):
+            X, state = blk(X, state)
+        '''
+        if not self.training:
+            return self.dense(X)[:, -1:, :], state
+        '''
+        return self.dense(X), state
+```
 
 ## Transformers for Vision
 
@@ -206,8 +297,6 @@ class ViTMLP(nn.Module):
 
 ViT的encoder block也与之前的类似，只不过改变了norm的位置：
 
-==这里实现可能有问题，和上面的图没对上==：
-
 ```python
 class ViTBlock(nn.Module):
     def __init__(self, num_hiddens, norm_shape, mlp_num_hiddens,
@@ -220,9 +309,9 @@ class ViTBlock(nn.Module):
         self.mlp = ViTMLP(mlp_num_hiddens, num_hiddens, dropout)
 
     def forward(self, X, valid_lens=None):
-        X = self.ln1(X)
-        return X + self.mlp(self.ln2(
-            X + self.attention(X, X, X, valid_lens)))
+        X1 = self.ln1(X)
+        Y1 = X + self.attention(X1, X1, X1, valid_lens)
+        return Y1 + self.mlp(self.ln2(Y1))
 ```
 
 ### Putting All Things Together
